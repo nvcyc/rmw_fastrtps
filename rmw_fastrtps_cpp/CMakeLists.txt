@@ -50,6 +50,10 @@ find_package(rosidl_runtime_c REQUIRED)
 find_package(rosidl_typesupport_fastrtps_c REQUIRED)
 find_package(rosidl_typesupport_fastrtps_cpp REQUIRED)
 
+# Buffer backend dependencies
+find_package(rosidl_runtime_cpp REQUIRED)
+find_package(rosidl_buffer_registry REQUIRED)
+
 include_directories(include)
 
 add_library(rmw_fastrtps_cpp
@@ -80,6 +84,7 @@ add_library(rmw_fastrtps_cpp
   src/rmw_node_names.cpp
   src/rmw_publish.cpp
   src/rmw_publisher.cpp
+  #src/rmw_publisher_locality.cpp
   src/rmw_qos.cpp
   src/rmw_request.cpp
   src/rmw_response.cpp
@@ -97,6 +102,7 @@ add_library(rmw_fastrtps_cpp
   src/subscription.cpp
   src/type_support_common.cpp
   src/rmw_get_endpoint_network_flow.cpp
+  src/buffer_backend_loader.cpp
 )
 target_link_libraries(rmw_fastrtps_cpp PUBLIC
   fastcdr
@@ -114,6 +120,8 @@ target_link_libraries(rmw_fastrtps_cpp PRIVATE
   rosidl_dynamic_typesupport_fastrtps::rosidl_dynamic_typesupport_fastrtps
   rosidl_typesupport_fastrtps_c::rosidl_typesupport_fastrtps_c
   tracetools::tracetools
+  ${rosidl_runtime_cpp_TARGETS}
+  rosidl_buffer_registry::rosidl_buffer_registry
 )
 
 configure_rmw_library(rmw_fastrtps_cpp)

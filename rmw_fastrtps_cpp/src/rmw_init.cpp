@@ -45,6 +45,8 @@
 #include "rmw_fastrtps_cpp/publisher.hpp"
 #include "rmw_fastrtps_cpp/subscription.hpp"
 
+#include "buffer_backend_loader.hpp"
+
 extern "C"
 {
 rmw_ret_t
@@ -114,6 +116,15 @@ rmw_init(const rmw_init_options_t * options, rmw_context_t * context)
   rmw_ret_t ret = rmw_init_options_copy(options, &context->options);
   if (RMW_RET_OK != ret) {
     return ret;
+  }
+
+  // Initialize buffer backends for serialization
+  // This loads and registers all available buffer backends (CPU, CUDA, etc.)
+  try {
+    rmw_fastrtps_cpp::initialize_buffer_backends();
+  } catch (const std::exception & e) {
+    // Non-fatal: buffer backends are optional for basic RMW functionality
+    // If no buffer backends are available, Buffer fields will fail to serialize
   }
 
   cleanup_impl.cancel();

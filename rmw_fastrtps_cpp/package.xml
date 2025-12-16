@@ -36,6 +36,9 @@
   <build_depend>rosidl_typesupport_fastrtps_cpp</build_depend>
   <build_depend>tracetools</build_depend>
 
+  <!-- Buffer backend dependency -->
+  <build_depend>rosidl_buffer_registry</build_depend>
+
   <build_export_depend>fastcdr</build_export_depend>
   <build_export_depend>fastrtps</build_export_depend>
   <build_export_depend>fastrtps_cmake_module</build_export_depend>
@@ -57,6 +60,9 @@
   <exec_depend>rosidl_dynamic_typesupport</exec_depend>
   <exec_depend>rosidl_dynamic_typesupport_fastrtps</exec_depend>
   <exec_depend>tracetools</exec_depend>
+
+  <!-- Buffer backend runtime dependencies -->
+  <exec_depend>rosidl_buffer_registry</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
