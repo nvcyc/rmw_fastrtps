@@ -169,7 +169,7 @@ rmw_create_subscription(
     buf_registry.register_publisher_discovery_callback(
       subscription->topic_name,
       info->subscription_gid_,
-      [info, participant_info](const rmw_fastrtps_cpp::BufferEndpointInfo & pub_info) {
+      [info](const rmw_fastrtps_cpp::BufferEndpointInfo & pub_info) {
         std::lock_guard<std::mutex> lock(info->buffer_mutex_);
 
         // Skip if already have endpoint for this publisher
@@ -232,17 +232,6 @@ rmw_create_subscription(
         std::memcpy(
           endpoint->publisher_endpoint_info.endpoint_gid,
           pub_info.gid.data, RMW_GID_STORAGE_SIZE);
-
-        RCUTILS_LOG_INFO_NAMED(
-          "rmw_fastrtps_cpp",
-          "Buffer subscription: acquiring entity_creation_mutex_ for '%s'",
-          unique_topic.c_str());
-
-        std::lock_guard<std::mutex> entity_lock(participant_info->entity_creation_mutex_);
-
-        RCUTILS_LOG_INFO_NAMED(
-          "rmw_fastrtps_cpp",
-          "Buffer subscription: creating topic '%s'", unique_topic.c_str());
 
         eprosima::fastdds::dds::TopicQos topic_qos =
           info->dds_participant_->get_default_topic_qos();

@@ -279,12 +279,18 @@ private:
           ser_type_hash_ptr);
 
         // Parse buffer backend info and invoke callback if present.
+        // Copy the callback outside the lock so buffer_cb_mutex_ is not held
+        // during the callback (which may acquire other mutexes or do DDS work).
         auto buffer_backends = parse_buffer_backends_from_user_data(
           userDataValue.data(), userDataValue.size());
         if (!buffer_backends.empty()) {
-          std::lock_guard<std::mutex> lock(buffer_cb_mutex_);
-          if (buffer_discovery_cb_) {
-            buffer_discovery_cb_(
+          BufferDiscoveryCallback cb_copy;
+          {
+            std::lock_guard<std::mutex> lock(buffer_cb_mutex_);
+            cb_copy = buffer_discovery_cb_;
+          }
+          if (cb_copy) {
+            cb_copy(
               rmw_fastrtps_shared_cpp::create_rmw_gid(identifier_, proxyData.guid),
               proxyData.topic_name.to_string(),
               buffer_backends,
