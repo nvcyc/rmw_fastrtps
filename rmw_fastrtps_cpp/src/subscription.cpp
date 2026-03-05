@@ -55,6 +55,9 @@
 #include "rmw_fastrtps_cpp/identifier.hpp"
 #include "rmw_fastrtps_cpp/subscription.hpp"
 
+#include "rcl_buffer_backend_registry/buffer_backend_registry.hpp"
+#include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
+
 #include "tracetools/tracetools.h"
 
 #include "type_support_common.hpp"
@@ -655,9 +658,53 @@ __create_subscription(
     reader_qos.data_sharing().off();
   }
 
+  // Detect buffer-aware message type
+  bool has_buffer_fields = callbacks->has_buffer_fields;
+  std::unordered_map<std::string, std::string> filtered_backends;
+  std::vector<std::string> my_backend_types;
+
+  if (has_buffer_fields) {
+    auto all_backends =
+      rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
+
+    // Parse acceptable_buffer_backends option (comma-separated) to filter
+    if (subscription_options->acceptable_buffer_backends &&
+      strlen(subscription_options->acceptable_buffer_backends) > 0)
+    {
+      std::string acceptable(subscription_options->acceptable_buffer_backends);
+      size_t start = 0;
+      while (start < acceptable.size()) {
+        size_t end = acceptable.find(',', start);
+        std::string token = acceptable.substr(
+          start, end == std::string::npos ? std::string::npos : end - start);
+        // Trim whitespace
+        auto begin_it = token.find_first_not_of(" \t");
+        auto end_it = token.find_last_not_of(" \t");
+        if (begin_it != std::string::npos) {
+          token = token.substr(begin_it, end_it - begin_it + 1);
+        }
+        if (!token.empty()) {
+          auto it = all_backends.find(token);
+          if (it != all_backends.end()) {
+            filtered_backends[it->first] = it->second;
+            my_backend_types.push_back(it->first);
+          }
+        }
+        if (end == std::string::npos) {break;}
+        start = end + 1;
+      }
+    } else {
+      filtered_backends = all_backends;
+      for (const auto & [k, v] : all_backends) {
+        my_backend_types.push_back(k);
+      }
+    }
+  }
+
   if (!get_datareader_qos(
       *qos_policies, *type_supports->get_type_hash_func(type_supports),
-      reader_qos))
+      reader_qos, nullptr,
+      has_buffer_fields ? &filtered_backends : nullptr))
   {
     RMW_SET_ERROR_MSG("create_subscription() failed setting data reader QoS");
     return nullptr;
@@ -674,7 +721,7 @@ __create_subscription(
 
   info->datareader_qos_ = reader_qos;
 
-  // create_datareader
+  // Always create the base DataReader (serves as discovery placeholder even for buffer-aware)
   if (!rmw_fastrtps_shared_cpp::create_datareader(
       info->datareader_qos_,
       subscription_options,
@@ -729,6 +776,23 @@ __create_subscription(
   rmw_subscription->options = *subscription_options;
   rmw_fastrtps_shared_cpp::__init_subscription_for_loans(rmw_subscription);
   rmw_subscription->is_cft_enabled = info->filtered_topic_ != nullptr;
+
+  // Buffer-aware subscription setup
+  info->is_buffer_aware_ = has_buffer_fields;
+  if (has_buffer_fields) {
+    info->my_backend_types_ = std::move(my_backend_types);
+    info->local_endpoint_info_ = rmw_get_zero_initialized_topic_endpoint_info();
+    info->local_endpoint_info_.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
+    std::memcpy(
+      info->local_endpoint_info_.endpoint_gid,
+      info->subscription_gid_.data, RMW_GID_STORAGE_SIZE);
+
+    info->buffer_data_guard_ =
+      std::make_unique<eprosima::fastdds::dds::GuardCondition>();
+
+    rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().notify_endpoint_created(
+      info->local_endpoint_info_);
+  }
 
   cleanup_rmw_subscription.cancel();
   cleanup_datareader.cancel();

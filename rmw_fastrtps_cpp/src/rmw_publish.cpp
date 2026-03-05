@@ -12,16 +12,102 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <vector>
+
 #include "fastcdr/Cdr.h"
 #include "fastcdr/FastBuffer.h"
 
+#include "fastdds/rtps/common/Time_t.hpp"
+
 #include "rmw/allocators.h"
 #include "rmw/error_handling.h"
+#include "rmw/impl/cpp/macros.hpp"
 #include "rmw/rmw.h"
 
+#include "rcutils/logging_macros.h"
+
+#include "rmw_fastrtps_shared_cpp/custom_publisher_info.hpp"
 #include "rmw_fastrtps_shared_cpp/rmw_common.hpp"
+#include "rmw_fastrtps_shared_cpp/TypeSupport.hpp"
 
 #include "rmw_fastrtps_cpp/identifier.hpp"
+
+#include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
+
+#include "buffer_backend_loader.hpp"
+
+#include "tracetools/tracetools.h"
+
+namespace
+{
+
+rmw_ret_t
+publish_buffer_aware(
+  const rmw_publisher_t * publisher,
+  const void * ros_message)
+{
+  auto info = static_cast<CustomPublisherInfo *>(publisher->data);
+  auto callbacks = static_cast<const message_type_support_callbacks_t *>(info->type_support_impl_);
+
+  std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+
+  if (info->buffer_endpoints_.empty()) {
+    return RMW_RET_OK;
+  }
+
+  eprosima::fastdds::dds::Time_t stamp;
+  eprosima::fastdds::dds::Time_t::now(stamp);
+  TRACETOOLS_TRACEPOINT(rmw_publish, publisher, ros_message, stamp.to_ns());
+
+  for (const auto & endpoint : info->buffer_endpoints_) {
+    // Set thread-local backend compatibility for this subscriber
+    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(&endpoint->backend_compat);
+
+    // Serialize with endpoint-aware serialization
+    uint32_t serialized_size = callbacks->get_serialized_size(ros_message);
+    // Add some buffer overhead for descriptor data
+    size_t buffer_size = serialized_size + 4096;
+    std::vector<uint8_t> buffer_data(buffer_size);
+
+    eprosima::fastcdr::FastBuffer fast_buffer(
+      reinterpret_cast<char *>(buffer_data.data()), buffer_size);
+    eprosima::fastcdr::Cdr ser(
+      fast_buffer, eprosima::fastcdr::Cdr::DEFAULT_ENDIAN,
+      eprosima::fastcdr::CdrVersion::XCDRv1);
+    ser.set_encoding_flag(eprosima::fastcdr::EncodingAlgorithmFlag::PLAIN_CDR);
+
+    bool ok = callbacks->cdr_serialize_with_endpoint(
+      ros_message, ser, endpoint->subscriber_endpoint_info);
+
+    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(nullptr);
+
+    if (!ok) {
+      RCUTILS_LOG_ERROR_NAMED(
+        "rmw_fastrtps_cpp",
+        "Buffer-aware serialize failed for endpoint '%s'", endpoint->key.c_str());
+      continue;
+    }
+
+    // Write the CDR buffer to this endpoint's DataWriter
+    rmw_fastrtps_shared_cpp::SerializedData data;
+    data.type = rmw_fastrtps_shared_cpp::FASTDDS_SERIALIZED_DATA_TYPE_CDR_BUFFER;
+    data.data = &ser;
+    data.impl = nullptr;
+
+    if (eprosima::fastdds::dds::RETCODE_OK !=
+      endpoint->data_writer->write_w_timestamp(
+        &data, eprosima::fastdds::dds::HANDLE_NIL, stamp))
+    {
+      RCUTILS_LOG_ERROR_NAMED(
+        "rmw_fastrtps_cpp",
+        "Buffer-aware write failed for endpoint '%s'", endpoint->key.c_str());
+    }
+  }
+
+  return RMW_RET_OK;
+}
+
+}  // namespace
 
 extern "C"
 {
@@ -31,6 +117,22 @@ rmw_publish(
   const void * ros_message,
   rmw_publisher_allocation_t * allocation)
 {
+  (void) allocation;
+  RMW_CHECK_FOR_NULL_WITH_MSG(
+    publisher, "publisher handle is null",
+    return RMW_RET_INVALID_ARGUMENT);
+  RMW_CHECK_TYPE_IDENTIFIERS_MATCH(
+    publisher, publisher->implementation_identifier, eprosima_fastrtps_identifier,
+    return RMW_RET_INCORRECT_RMW_IMPLEMENTATION);
+  RMW_CHECK_FOR_NULL_WITH_MSG(
+    ros_message, "ros message handle is null",
+    return RMW_RET_INVALID_ARGUMENT);
+
+  auto info = static_cast<CustomPublisherInfo *>(publisher->data);
+  if (info->is_buffer_aware_) {
+    return publish_buffer_aware(publisher, ros_message);
+  }
+
   return rmw_fastrtps_shared_cpp::__rmw_publish(
     eprosima_fastrtps_identifier, publisher, ros_message, allocation);
 }

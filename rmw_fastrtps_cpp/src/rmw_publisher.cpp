@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdio>
+#include <set>
 #include <string>
 
 #include "rmw/allocators.h"
@@ -21,6 +23,7 @@
 #include "rmw/rmw.h"
 
 #include "rcpputils/scope_exit.hpp"
+#include "rcutils/logging_macros.h"
 
 #include "rmw/impl/cpp/macros.hpp"
 
@@ -29,14 +32,20 @@
 #include "rmw_fastrtps_shared_cpp/custom_participant_info.hpp"
 #include "rmw_fastrtps_shared_cpp/custom_publisher_info.hpp"
 #include "rmw_fastrtps_shared_cpp/publisher.hpp"
+#include "rmw_fastrtps_shared_cpp/qos.hpp"
 #include "rmw_fastrtps_shared_cpp/rmw_common.hpp"
 #include "rmw_fastrtps_shared_cpp/rmw_context_impl.hpp"
+#include "rmw_fastrtps_shared_cpp/create_rmw_gid.hpp"
 
 #include "rmw_fastrtps_cpp/identifier.hpp"
 #include "rmw_fastrtps_cpp/publisher.hpp"
 
+#include "rcl_buffer_backend_registry/buffer_backend_registry.hpp"
+
 #include "rmw_dds_common/context.hpp"
 #include "rmw_dds_common/msg/participant_entities_info.hpp"
+
+#include "buffer_endpoint_registry.hpp"
 
 extern "C"
 {
@@ -116,7 +125,7 @@ rmw_create_publisher(
     });
 
   auto common_context = static_cast<rmw_dds_common::Context *>(node->context->impl->common);
-  auto info = static_cast<const CustomPublisherInfo *>(publisher->data);
+  auto info = static_cast<CustomPublisherInfo *>(publisher->data);
 
   // Update graph
   if (RMW_RET_OK != common_context->add_publisher_graph(
@@ -124,6 +133,130 @@ rmw_create_publisher(
       node->name, node->namespace_))
   {
     return nullptr;
+  }
+
+  // Register buffer-aware subscriber discovery callback
+  if (info->is_buffer_aware_) {
+    auto & buf_registry = rmw_fastrtps_cpp::BufferEndpointRegistry::get_instance();
+    buf_registry.register_subscriber_discovery_callback(
+      publisher->topic_name,
+      info->publisher_gid,
+      [info, participant_info](const rmw_fastrtps_cpp::BufferEndpointInfo & sub_info) {
+        std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+
+        // Skip if already have endpoint for this subscriber
+        for (const auto & ep : info->buffer_endpoints_) {
+          if (std::memcmp(ep->target_subscriber_gid.data, sub_info.gid.data,
+            RMW_GID_STORAGE_SIZE) == 0)
+          {
+            RCUTILS_LOG_DEBUG_NAMED(
+              "rmw_fastrtps_cpp",
+              "Buffer publisher: subscriber already known, skipping");
+            return;
+          }
+        }
+
+        auto gid_to_hex = [](const rmw_gid_t & gid, size_t bytes = 8) -> std::string {
+            static const char hex_chars[] = "0123456789abcdef";
+            std::string result;
+            result.reserve(bytes * 2);
+            for (size_t i = 0; i < bytes && i < RMW_GID_STORAGE_SIZE; ++i) {
+              result += hex_chars[(gid.data[i] >> 4) & 0xF];
+              result += hex_chars[gid.data[i] & 0xF];
+            }
+            return result;
+          };
+
+        std::string pub_hex = gid_to_hex(info->publisher_gid);
+        std::string sub_hex = gid_to_hex(sub_info.gid);
+        std::string unique_topic = info->topic_->get_name() +
+          "/_buf/" + pub_hex + "_" + sub_hex;
+
+        RCUTILS_LOG_INFO_NAMED(
+          "rmw_fastrtps_cpp",
+          "Buffer publisher: subscriber discovered, computing compatibility for '%s'",
+          unique_topic.c_str());
+
+        auto & backend_registry =
+          rcl_buffer_backend_registry::BufferBackendRegistry::get_instance();
+        std::vector<rmw_topic_endpoint_info_t> existing_endpoints;
+        existing_endpoints.push_back(info->local_endpoint_info_);
+        for (const auto & existing : info->buffer_endpoints_) {
+          existing_endpoints.push_back(existing->subscriber_endpoint_info);
+        }
+        std::unordered_map<std::string, std::vector<std::set<uint32_t>>> backend_endpoint_groups;
+        rmw_topic_endpoint_info_t sub_ep_info = rmw_get_zero_initialized_topic_endpoint_info();
+        sub_ep_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
+        std::memcpy(sub_ep_info.endpoint_gid, sub_info.gid.data, RMW_GID_STORAGE_SIZE);
+        auto compat = backend_registry.notify_endpoint_discovered(
+          sub_ep_info, existing_endpoints, backend_endpoint_groups,
+          sub_info.backend_aux_info);
+
+        auto endpoint = std::make_shared<BufferPublisherEndpoint>();
+        endpoint->key = unique_topic;
+        endpoint->target_subscriber_gid = sub_info.gid;
+        endpoint->backend_aux_info = sub_info.backend_aux_info;
+        endpoint->backend_compat = compat;
+
+        endpoint->subscriber_endpoint_info = rmw_get_zero_initialized_topic_endpoint_info();
+        endpoint->subscriber_endpoint_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
+        std::memcpy(
+          endpoint->subscriber_endpoint_info.endpoint_gid,
+          sub_info.gid.data, RMW_GID_STORAGE_SIZE);
+
+        RCUTILS_LOG_INFO_NAMED(
+          "rmw_fastrtps_cpp",
+          "Buffer publisher: acquiring entity_creation_mutex_ for '%s'",
+          unique_topic.c_str());
+
+        std::lock_guard<std::mutex> entity_lock(participant_info->entity_creation_mutex_);
+
+        RCUTILS_LOG_INFO_NAMED(
+          "rmw_fastrtps_cpp",
+          "Buffer publisher: creating topic '%s'", unique_topic.c_str());
+
+        eprosima::fastdds::dds::TopicQos topic_qos =
+          info->participant_->get_default_topic_qos();
+        auto * topic = info->participant_->create_topic(
+          unique_topic,
+          info->type_support_.get_type_name(),
+          topic_qos);
+        if (!topic) {
+          RCUTILS_LOG_ERROR_NAMED(
+            "rmw_fastrtps_cpp",
+            "Failed to create per-subscriber topic '%s'", unique_topic.c_str());
+          return;
+        }
+        endpoint->topic = topic;
+
+        RCUTILS_LOG_INFO_NAMED(
+          "rmw_fastrtps_cpp",
+          "Buffer publisher: creating DataWriter for '%s'", unique_topic.c_str());
+
+        eprosima::fastdds::dds::DataWriterQos writer_qos =
+          info->dds_publisher_->get_default_datawriter_qos();
+        writer_qos.publish_mode().kind = eprosima::fastdds::dds::SYNCHRONOUS_PUBLISH_MODE;
+        writer_qos.endpoint().history_memory_policy =
+          eprosima::fastdds::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
+        writer_qos.data_sharing().off();
+        writer_qos.reliability().kind = eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS;
+
+        auto * data_writer = info->dds_publisher_->create_datawriter(
+          topic, writer_qos, nullptr);
+        if (!data_writer) {
+          info->participant_->delete_topic(topic);
+          RCUTILS_LOG_ERROR_NAMED(
+            "rmw_fastrtps_cpp",
+            "Failed to create per-subscriber DataWriter for '%s'", unique_topic.c_str());
+          return;
+        }
+        endpoint->data_writer = data_writer;
+
+        info->buffer_endpoints_.push_back(endpoint);
+        RCUTILS_LOG_INFO_NAMED(
+          "rmw_fastrtps_cpp",
+          "Buffer publisher: created per-sub endpoint '%s'", unique_topic.c_str());
+      });
   }
 
   cleanup_publisher.cancel();
@@ -212,6 +345,25 @@ rmw_destroy_publisher(rmw_node_t * node, rmw_publisher_t * publisher)
     publisher->implementation_identifier,
     eprosima_fastrtps_identifier,
     return RMW_RET_INCORRECT_RMW_IMPLEMENTATION);
+
+  auto info = static_cast<CustomPublisherInfo *>(publisher->data);
+  if (info && info->is_buffer_aware_) {
+    // Unregister buffer discovery callbacks
+    rmw_fastrtps_cpp::BufferEndpointRegistry::get_instance().unregister_callbacks(
+      info->publisher_gid);
+
+    // Clean up per-subscriber buffer endpoints
+    std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+    for (auto & endpoint : info->buffer_endpoints_) {
+      if (endpoint->data_writer) {
+        info->dds_publisher_->delete_datawriter(endpoint->data_writer);
+      }
+      if (endpoint->topic) {
+        info->participant_->delete_topic(endpoint->topic);
+      }
+    }
+    info->buffer_endpoints_.clear();
+  }
 
   return rmw_fastrtps_shared_cpp::__rmw_destroy_publisher(
     eprosima_fastrtps_identifier, node, publisher);
