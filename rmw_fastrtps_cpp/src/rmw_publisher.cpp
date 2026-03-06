@@ -137,11 +137,15 @@ rmw_create_publisher(
 
   // Register buffer-aware subscriber discovery callback
   if (info->is_buffer_aware_) {
+    auto alive = info->buffer_alive_flag_;
     auto & buf_registry = rmw_fastrtps_cpp::BufferEndpointRegistry::get_instance();
     buf_registry.register_subscriber_discovery_callback(
       publisher->topic_name,
       info->publisher_gid,
-      [info](const rmw_fastrtps_cpp::BufferEndpointInfo & sub_info) {
+      [info, alive](const rmw_fastrtps_cpp::BufferEndpointInfo & sub_info) {
+        if (!alive->load()) {
+          return;
+        }
         std::lock_guard<std::mutex> lock(info->buffer_mutex_);
 
         // Skip if already have endpoint for this subscriber
@@ -337,11 +341,11 @@ rmw_destroy_publisher(rmw_node_t * node, rmw_publisher_t * publisher)
 
   auto info = static_cast<CustomPublisherInfo *>(publisher->data);
   if (info && info->is_buffer_aware_) {
-    // Unregister buffer discovery callbacks
+    info->buffer_alive_flag_->store(false);
+
     rmw_fastrtps_cpp::BufferEndpointRegistry::get_instance().unregister_callbacks(
       info->publisher_gid);
 
-    // Clean up per-subscriber buffer endpoints
     std::lock_guard<std::mutex> lock(info->buffer_mutex_);
     for (auto & endpoint : info->buffer_endpoints_) {
       if (endpoint->data_writer) {

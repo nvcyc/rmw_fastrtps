@@ -60,12 +60,9 @@ publish_buffer_aware(
   TRACETOOLS_TRACEPOINT(rmw_publish, publisher, ros_message, stamp.to_ns());
 
   for (const auto & endpoint : info->buffer_endpoints_) {
-    // Set thread-local backend compatibility for this subscriber
-    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(&endpoint->backend_compat);
+    rmw_fastrtps_cpp::BackendCompatibilityGuard compat_guard(endpoint->backend_compat);
 
-    // Serialize with endpoint-aware serialization
     uint32_t serialized_size = callbacks->get_serialized_size(ros_message);
-    // Add some buffer overhead for descriptor data
     size_t buffer_size = serialized_size + 4096;
     std::vector<uint8_t> buffer_data(buffer_size);
 
@@ -78,8 +75,6 @@ publish_buffer_aware(
 
     bool ok = callbacks->cdr_serialize_with_endpoint(
       ros_message, ser, endpoint->subscriber_endpoint_info);
-
-    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(nullptr);
 
     if (!ok) {
       RCUTILS_LOG_ERROR_NAMED(

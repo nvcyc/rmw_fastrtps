@@ -15,6 +15,7 @@
 #ifndef RMW_FASTRTPS_SHARED_CPP__CUSTOM_PUBLISHER_INFO_HPP_
 #define RMW_FASTRTPS_SHARED_CPP__CUSTOM_PUBLISHER_INFO_HPP_
 
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -112,6 +113,10 @@ typedef struct CustomPublisherInfo : public CustomEventInfo
   rmw_topic_endpoint_info_t local_endpoint_info_{};
   std::mutex buffer_mutex_;
   std::vector<std::shared_ptr<BufferPublisherEndpoint>> buffer_endpoints_;
+  /// Shared flag set to false before destruction so discovery callbacks that
+  /// captured a raw pointer to this object can detect the invalidation.
+  std::shared_ptr<std::atomic<bool>> buffer_alive_flag_{
+    std::make_shared<std::atomic<bool>>(true)};
 
   // DDS objects needed to create dynamic DataWriters
   eprosima::fastdds::dds::DomainParticipant * participant_{nullptr};

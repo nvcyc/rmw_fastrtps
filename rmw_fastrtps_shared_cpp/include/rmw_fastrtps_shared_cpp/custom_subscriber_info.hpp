@@ -16,6 +16,7 @@
 #define RMW_FASTRTPS_SHARED_CPP__CUSTOM_SUBSCRIBER_INFO_HPP_
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -137,6 +138,10 @@ struct CustomSubscriberInfo : public CustomEventInfo
   rmw_topic_endpoint_info_t local_endpoint_info_{};
   std::mutex buffer_mutex_;
   std::vector<std::shared_ptr<BufferSubscriptionEndpoint>> buffer_endpoints_;
+  /// Shared flag set to false before destruction so discovery callbacks that
+  /// captured a raw pointer to this object can detect the invalidation.
+  std::shared_ptr<std::atomic<bool>> buffer_alive_flag_{
+    std::make_shared<std::atomic<bool>>(true)};
   /// Guard condition triggered when per-publisher DataReaders receive data.
   /// Used by rmw_wait to detect data on buffer-aware subscriptions.
   std::unique_ptr<eprosima::fastdds::dds::GuardCondition> buffer_data_guard_;

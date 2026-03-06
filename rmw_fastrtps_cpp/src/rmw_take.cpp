@@ -83,8 +83,7 @@ take_buffer_aware(
       continue;
     }
 
-    // Set thread-local backend compatibility for the deserializer
-    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(&endpoint->backend_compat);
+    rmw_fastrtps_cpp::BackendCompatibilityGuard compat_guard(endpoint->backend_compat);
 
     eprosima::fastcdr::Cdr deser(
       receive_buffer, eprosima::fastcdr::Cdr::DEFAULT_ENDIAN,
@@ -92,8 +91,6 @@ take_buffer_aware(
     deser.set_encoding_flag(eprosima::fastcdr::EncodingAlgorithmFlag::PLAIN_CDR);
     bool deser_ok = callbacks->cdr_deserialize_with_endpoint(
       deser, ros_message, endpoint->publisher_endpoint_info);
-
-    rmw_fastrtps_cpp::set_thread_local_backend_compatibility(nullptr);
 
     if (!deser_ok) {
       RCUTILS_LOG_ERROR_NAMED(
