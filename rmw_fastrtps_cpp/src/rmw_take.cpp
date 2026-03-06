@@ -34,8 +34,6 @@
 
 #include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
 
-#include "buffer_backend_loader.hpp"
-
 #include "rcpputils/scope_exit.hpp"
 
 namespace
@@ -82,8 +80,6 @@ take_buffer_aware(
     if (!info_seq[0].valid_data) {
       continue;
     }
-
-    rmw_fastrtps_cpp::BackendCompatibilityGuard compat_guard(endpoint->backend_compat);
 
     eprosima::fastcdr::Cdr deser(
       receive_buffer, eprosima::fastcdr::Cdr::DEFAULT_ENDIAN,

@@ -90,7 +90,6 @@ struct BufferPublisherEndpoint
   rmw_gid_t target_subscriber_gid{};
   rmw_topic_endpoint_info_t subscriber_endpoint_info{};
   std::unordered_map<std::string, std::string> backend_aux_info;
-  std::unordered_map<std::string, bool> backend_compat;
 };
 
 typedef struct CustomPublisherInfo : public CustomEventInfo

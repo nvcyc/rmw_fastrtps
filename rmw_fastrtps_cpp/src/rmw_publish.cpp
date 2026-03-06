@@ -34,8 +34,6 @@
 
 #include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
 
-#include "buffer_backend_loader.hpp"
-
 #include "tracetools/tracetools.h"
 
 namespace
@@ -60,8 +58,6 @@ publish_buffer_aware(
   TRACETOOLS_TRACEPOINT(rmw_publish, publisher, ros_message, stamp.to_ns());
 
   for (const auto & endpoint : info->buffer_endpoints_) {
-    rmw_fastrtps_cpp::BackendCompatibilityGuard compat_guard(endpoint->backend_compat);
-
     uint32_t serialized_size = callbacks->get_serialized_size(ros_message);
     size_t buffer_size = serialized_size + 4096;
     std::vector<uint8_t> buffer_data(buffer_size);

@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include <cstdio>
-#include <set>
 #include <string>
 
 #include "rmw/allocators.h"
@@ -39,8 +38,6 @@
 
 #include "rmw_fastrtps_cpp/identifier.hpp"
 #include "rmw_fastrtps_cpp/publisher.hpp"
-
-#include "rcl_buffer_backend_registry/buffer_backend_registry.hpp"
 
 #include "rmw_dds_common/context.hpp"
 #include "rmw_dds_common/msg/participant_entities_info.hpp"
@@ -181,26 +178,10 @@ rmw_create_publisher(
           "Buffer publisher: subscriber discovered, computing compatibility for '%s'",
           unique_topic.c_str());
 
-        auto & backend_registry =
-          rcl_buffer_backend_registry::BufferBackendRegistry::get_instance();
-        std::vector<rmw_topic_endpoint_info_t> existing_endpoints;
-        existing_endpoints.push_back(info->local_endpoint_info_);
-        for (const auto & existing : info->buffer_endpoints_) {
-          existing_endpoints.push_back(existing->subscriber_endpoint_info);
-        }
-        std::unordered_map<std::string, std::vector<std::set<uint32_t>>> backend_endpoint_groups;
-        rmw_topic_endpoint_info_t sub_ep_info = rmw_get_zero_initialized_topic_endpoint_info();
-        sub_ep_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;
-        std::memcpy(sub_ep_info.endpoint_gid, sub_info.gid.data, RMW_GID_STORAGE_SIZE);
-        auto compat = backend_registry.notify_endpoint_discovered(
-          sub_ep_info, existing_endpoints, backend_endpoint_groups,
-          sub_info.backend_aux_info);
-
         auto endpoint = std::make_shared<BufferPublisherEndpoint>();
         endpoint->key = unique_topic;
         endpoint->target_subscriber_gid = sub_info.gid;
         endpoint->backend_aux_info = sub_info.backend_aux_info;
-        endpoint->backend_compat = compat;
 
         endpoint->subscriber_endpoint_info = rmw_get_zero_initialized_topic_endpoint_info();
         endpoint->subscriber_endpoint_info.endpoint_type = RMW_ENDPOINT_SUBSCRIPTION;

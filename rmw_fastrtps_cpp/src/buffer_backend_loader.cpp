@@ -24,11 +24,6 @@
 namespace rmw_fastrtps_cpp
 {
 
-namespace
-{
-thread_local const std::unordered_map<std::string, bool> * g_tls_backend_compat = nullptr;
-}  // namespace
-
 void initialize_buffer_backends()
 {
   auto & registry = rcl_buffer_backend_registry::BufferBackendRegistry::get_instance();
@@ -83,10 +78,6 @@ void initialize_buffer_backends()
     }
   }
 
-  rosidl_typesupport_fastrtps_cpp::get_endpoint_compatibility_resolver() =
-    [](const rmw_topic_endpoint_info_t &, const std::string & backend_type) {
-      return rmw_fastrtps_cpp::get_thread_local_backend_compatibility(backend_type);
-    };
 }
 
 void shutdown_buffer_backends()
@@ -109,25 +100,6 @@ void shutdown_buffer_backends()
       "rmw_fastrtps_cpp", "Warning clearing backend registry: %s", e.what());
   }
 
-  rosidl_typesupport_fastrtps_cpp::get_endpoint_compatibility_resolver() = nullptr;
-}
-
-void set_thread_local_backend_compatibility(
-  const std::unordered_map<std::string, bool> * compat_map)
-{
-  g_tls_backend_compat = compat_map;
-}
-
-bool get_thread_local_backend_compatibility(const std::string & backend_type)
-{
-  if (!g_tls_backend_compat) {
-    return true;
-  }
-  auto it = g_tls_backend_compat->find(backend_type);
-  if (it == g_tls_backend_compat->end()) {
-    return true;
-  }
-  return it->second;
 }
 
 }  // namespace rmw_fastrtps_cpp
