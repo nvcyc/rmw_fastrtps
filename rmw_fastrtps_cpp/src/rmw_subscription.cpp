@@ -171,19 +171,6 @@ rmw_create_subscription(
         if (!alive->load()) {
           return;
         }
-        std::lock_guard<std::mutex> lock(info->buffer_mutex_);
-
-        // Skip if already have endpoint for this publisher
-        for (const auto & ep : info->buffer_endpoints_) {
-          if (std::memcmp(ep->publisher_gid.data, pub_info.gid.data,
-            RMW_GID_STORAGE_SIZE) == 0)
-          {
-            RCUTILS_LOG_DEBUG_NAMED(
-              "rmw_fastrtps_cpp",
-              "Buffer subscription: publisher already known, skipping");
-            return;
-          }
-        }
 
         auto gid_to_hex = [](const rmw_gid_t & gid, size_t bytes = 8) -> std::string {
             static const char hex_chars[] = "0123456789abcdef";
@@ -200,6 +187,23 @@ rmw_create_subscription(
         std::string sub_hex = gid_to_hex(info->subscription_gid_);
         std::string unique_topic = info->topic_name_mangled_ +
           "/_buf/" + pub_hex + "_" + sub_hex;
+
+        {
+          std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+          for (const auto & ep : info->buffer_endpoints_) {
+            if (std::memcmp(ep->publisher_gid.data, pub_info.gid.data,
+              RMW_GID_STORAGE_SIZE) == 0)
+            {
+              RCUTILS_LOG_DEBUG_NAMED(
+                "rmw_fastrtps_cpp",
+                "Buffer subscription: publisher already known, skipping");
+              return;
+            }
+          }
+          if (!info->pending_buffer_endpoints_.insert(unique_topic).second) {
+            return;
+          }
+        }
 
         RCUTILS_LOG_INFO_NAMED(
           "rmw_fastrtps_cpp",
@@ -227,6 +231,8 @@ rmw_create_subscription(
           RCUTILS_LOG_ERROR_NAMED(
             "rmw_fastrtps_cpp",
             "Failed to create per-publisher topic '%s'", unique_topic.c_str());
+          std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+          info->pending_buffer_endpoints_.erase(unique_topic);
           return;
         }
         endpoint->topic = topic;
@@ -255,12 +261,18 @@ rmw_create_subscription(
           RCUTILS_LOG_ERROR_NAMED(
             "rmw_fastrtps_cpp",
             "Failed to create per-publisher DataReader for '%s'", unique_topic.c_str());
+          std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+          info->pending_buffer_endpoints_.erase(unique_topic);
           return;
         }
         endpoint->data_reader = data_reader;
         endpoint->listener = buffer_listener;
 
-        info->buffer_endpoints_.push_back(endpoint);
+        {
+          std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+          info->buffer_endpoints_.push_back(endpoint);
+          info->pending_buffer_endpoints_.erase(unique_topic);
+        }
         RCUTILS_LOG_INFO_NAMED(
           "rmw_fastrtps_cpp",
           "Buffer subscription: created per-pub endpoint '%s'", unique_topic.c_str());
@@ -364,8 +376,13 @@ rmw_destroy_subscription(rmw_node_t * node, rmw_subscription_t * subscription)
     rmw_fastrtps_cpp::BufferEndpointRegistry::get_instance().unregister_callbacks(
       info->subscription_gid_);
 
-    std::lock_guard<std::mutex> lock(info->buffer_mutex_);
-    for (auto & endpoint : info->buffer_endpoints_) {
+    std::vector<std::shared_ptr<BufferSubscriptionEndpoint>> endpoints_to_destroy;
+    {
+      std::lock_guard<std::mutex> lock(info->buffer_mutex_);
+      endpoints_to_destroy = std::move(info->buffer_endpoints_);
+      info->buffer_endpoints_.clear();
+    }
+    for (auto & endpoint : endpoints_to_destroy) {
       if (endpoint->data_reader) {
         info->subscriber_->delete_datareader(endpoint->data_reader);
       }
@@ -373,7 +390,6 @@ rmw_destroy_subscription(rmw_node_t * node, rmw_subscription_t * subscription)
         info->dds_participant_->delete_topic(endpoint->topic);
       }
     }
-    info->buffer_endpoints_.clear();
   }
 
   return rmw_fastrtps_shared_cpp::__rmw_destroy_subscription(

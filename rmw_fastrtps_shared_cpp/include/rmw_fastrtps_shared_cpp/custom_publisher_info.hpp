@@ -112,6 +112,7 @@ typedef struct CustomPublisherInfo : public CustomEventInfo
   rmw_topic_endpoint_info_t local_endpoint_info_{};
   std::mutex buffer_mutex_;
   std::vector<std::shared_ptr<BufferPublisherEndpoint>> buffer_endpoints_;
+  std::set<std::string> pending_buffer_endpoints_;
   /// Shared flag set to false before destruction so discovery callbacks that
   /// captured a raw pointer to this object can detect the invalidation.
   std::shared_ptr<std::atomic<bool>> buffer_alive_flag_{
