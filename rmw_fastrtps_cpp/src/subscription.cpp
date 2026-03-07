@@ -55,7 +55,7 @@
 #include "rmw_fastrtps_cpp/identifier.hpp"
 #include "rmw_fastrtps_cpp/subscription.hpp"
 
-#include "rcl_buffer_backend_registry/buffer_backend_registry.hpp"
+#include "rosidl_buffer_backend_registry/buffer_backend_registry.hpp"
 #include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
 
 #include "tracetools/tracetools.h"
@@ -665,7 +665,7 @@ __create_subscription(
 
   if (has_buffer_fields) {
     auto all_backends =
-      rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
+      rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
 
     // Parse acceptable_buffer_backends option (comma-separated) to filter
     if (subscription_options->acceptable_buffer_backends &&
@@ -790,7 +790,7 @@ __create_subscription(
     info->buffer_data_guard_ =
       std::make_unique<eprosima::fastdds::dds::GuardCondition>();
 
-    rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().notify_endpoint_created(
+    rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().notify_endpoint_created(
       info->local_endpoint_info_);
   }
 

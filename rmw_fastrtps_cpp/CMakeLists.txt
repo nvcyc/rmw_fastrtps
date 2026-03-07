@@ -47,7 +47,7 @@ find_package(rosidl_dynamic_typesupport_fastrtps REQUIRED)
 find_package(rosidl_runtime_c REQUIRED)
 find_package(rosidl_typesupport_fastrtps_c REQUIRED)
 find_package(rosidl_typesupport_fastrtps_cpp REQUIRED)
-find_package(rcl_buffer_backend_registry REQUIRED)
+find_package(rosidl_buffer_backend_registry REQUIRED)
 
 add_library(rmw_fastrtps_cpp
   src/buffer_endpoint_registry.cpp
@@ -108,7 +108,7 @@ target_link_libraries(rmw_fastrtps_cpp PUBLIC
 target_link_libraries(rmw_fastrtps_cpp PRIVATE
   rcpputils::rcpputils
   rcutils::rcutils
-  rcl_buffer_backend_registry::rcl_buffer_backend_registry
+  rosidl_buffer_backend_registry::rosidl_buffer_backend_registry
   rmw_dds_common::rmw_dds_common_library
   rosidl_dynamic_typesupport::rosidl_dynamic_typesupport
   rosidl_dynamic_typesupport_fastrtps::rosidl_dynamic_typesupport_fastrtps

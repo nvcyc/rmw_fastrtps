@@ -47,7 +47,7 @@
 #include "rmw_fastrtps_cpp/identifier.hpp"
 #include "rmw_fastrtps_cpp/publisher.hpp"
 
-#include "rcl_buffer_backend_registry/buffer_backend_registry.hpp"
+#include "rosidl_buffer_backend_registry/buffer_backend_registry.hpp"
 #include "rosidl_typesupport_fastrtps_cpp/message_type_support.h"
 
 #include "tracetools/tracetools.h"
@@ -258,7 +258,7 @@ rmw_fastrtps_cpp::create_publisher(
   std::unordered_map<std::string, std::string> backend_aux_info;
   if (has_buffer_fields) {
     backend_aux_info =
-      rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
+      rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
   }
 
   // Get QoS from RMW, optionally encoding buffer backend info in user_data
@@ -348,7 +348,7 @@ rmw_fastrtps_cpp::create_publisher(
       info->local_endpoint_info_.endpoint_gid,
       info->publisher_gid.data, RMW_GID_STORAGE_SIZE);
 
-    rcl_buffer_backend_registry::BufferBackendRegistry::get_instance().notify_endpoint_created(
+    rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().notify_endpoint_created(
       info->local_endpoint_info_);
   }
 
