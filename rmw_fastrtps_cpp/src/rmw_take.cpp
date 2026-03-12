@@ -132,7 +132,14 @@ rmw_take(
 
   auto info = static_cast<CustomSubscriberInfo *>(subscription->data);
   if (info->is_buffer_aware_) {
-    return take_buffer_aware(subscription, ros_message, taken, nullptr);
+    rmw_ret_t ret = take_buffer_aware(subscription, ros_message, taken, nullptr);
+    if (ret != RMW_RET_OK || *taken) {
+      return ret;
+    }
+    // No data from buffer endpoints; fall back to the main DataReader for
+    // messages published by non-buffer-aware publishers (e.g. cross-RMW).
+    return rmw_fastrtps_shared_cpp::__rmw_take(
+      eprosima_fastrtps_identifier, subscription, ros_message, taken, allocation);
   }
 
   return rmw_fastrtps_shared_cpp::__rmw_take(
@@ -156,7 +163,12 @@ rmw_take_with_info(
 
   auto info = static_cast<CustomSubscriberInfo *>(subscription->data);
   if (info->is_buffer_aware_) {
-    return take_buffer_aware(subscription, ros_message, taken, message_info);
+    rmw_ret_t ret = take_buffer_aware(subscription, ros_message, taken, message_info);
+    if (ret != RMW_RET_OK || *taken) {
+      return ret;
+    }
+    return rmw_fastrtps_shared_cpp::__rmw_take_with_info(
+      eprosima_fastrtps_identifier, subscription, ros_message, taken, message_info, allocation);
   }
 
   return rmw_fastrtps_shared_cpp::__rmw_take_with_info(

@@ -259,6 +259,11 @@ rmw_fastrtps_cpp::create_publisher(
   if (has_buffer_fields) {
     backend_aux_info =
       rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
+    // CPU serialization is always implicitly supported by buffer-aware publishers.
+    // Advertise "cpu" so subscribers can discover this publisher via user_data.
+    if (backend_aux_info.find("cpu") == backend_aux_info.end()) {
+      backend_aux_info["cpu"] = "";
+    }
   }
 
   // Get QoS from RMW, optionally encoding buffer backend info in user_data

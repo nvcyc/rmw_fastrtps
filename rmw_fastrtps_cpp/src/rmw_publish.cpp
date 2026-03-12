@@ -39,18 +39,25 @@
 namespace
 {
 
-rmw_ret_t
-publish_buffer_aware(
-  const rmw_publisher_t * publisher,
-  const void * ros_message)
+/// Publish to per-subscriber buffer endpoints. Returns true if there are
+/// non-buffer-aware subscribers on the main topic that still need to be
+/// served via the normal DataWriter.
+bool
+publish_to_buffer_endpoints(
+  CustomPublisherInfo * info,
+  const void * ros_message,
+  const rmw_publisher_t * publisher)
 {
-  auto info = static_cast<CustomPublisherInfo *>(publisher->data);
   auto callbacks = static_cast<const message_type_support_callbacks_t *>(info->type_support_impl_);
 
   std::lock_guard<std::mutex> lock(info->buffer_mutex_);
 
+  size_t total_matched = info->publisher_event_->subscription_count();
+  size_t buffer_count = info->buffer_endpoints_.size() + info->pending_buffer_endpoints_.size();
+  bool has_non_buffer_subscribers = (total_matched > buffer_count);
+
   if (info->buffer_endpoints_.empty()) {
-    return RMW_RET_OK;
+    return has_non_buffer_subscribers;
   }
 
   eprosima::fastdds::dds::Time_t stamp;
@@ -95,7 +102,7 @@ publish_buffer_aware(
     }
   }
 
-  return RMW_RET_OK;
+  return has_non_buffer_subscribers;
 }
 
 }  // namespace
@@ -121,7 +128,12 @@ rmw_publish(
 
   auto info = static_cast<CustomPublisherInfo *>(publisher->data);
   if (info->is_buffer_aware_) {
-    return publish_buffer_aware(publisher, ros_message);
+    bool needs_main_publish = publish_to_buffer_endpoints(info, ros_message, publisher);
+    if (needs_main_publish) {
+      return rmw_fastrtps_shared_cpp::__rmw_publish(
+        eprosima_fastrtps_identifier, publisher, ros_message, allocation);
+    }
+    return RMW_RET_OK;
   }
 
   return rmw_fastrtps_shared_cpp::__rmw_publish(
