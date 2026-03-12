@@ -14,8 +14,10 @@
 
 #include <rosidl_dynamic_typesupport/identifier.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "fastdds/dds/domain/DomainParticipant.hpp"
 #include "fastdds/dds/subscriber/Subscriber.hpp"
@@ -668,6 +670,7 @@ __create_subscription(
       rosidl_buffer_backend_registry::BufferBackendRegistry::get_instance().get_all_aux_info();
 
     // Parse acceptable_buffer_backends option (comma-separated) to filter
+    std::vector<std::string> requested_list;
     if (subscription_options->acceptable_buffer_backends &&
       strlen(subscription_options->acceptable_buffer_backends) > 0)
     {
@@ -677,26 +680,54 @@ __create_subscription(
         size_t end = acceptable.find(',', start);
         std::string token = acceptable.substr(
           start, end == std::string::npos ? std::string::npos : end - start);
-        // Trim whitespace
         auto begin_it = token.find_first_not_of(" \t");
         auto end_it = token.find_last_not_of(" \t");
         if (begin_it != std::string::npos) {
           token = token.substr(begin_it, end_it - begin_it + 1);
         }
         if (!token.empty()) {
-          auto it = all_backends.find(token);
-          if (it != all_backends.end()) {
-            filtered_backends[it->first] = it->second;
-            my_backend_types.push_back(it->first);
-          }
+          requested_list.push_back(token);
         }
         if (end == std::string::npos) {break;}
         start = end + 1;
       }
-    } else {
+    }
+
+    // "any": accept all installed backends
+    bool use_all = false;
+    for (const auto & name : requested_list) {
+      if (name == "any") {
+        use_all = true;
+        break;
+      }
+    }
+
+    // NULL, empty, or only "cpu" entries: CPU-only (backward compat default)
+    bool cpu_only = !use_all && (requested_list.empty() ||
+      std::all_of(requested_list.begin(), requested_list.end(),
+      [](const std::string & n) {return n == "cpu";}));
+
+    if (cpu_only) {
+      // CPU-only: advertise "cpu" as the only supported backend so the
+      // subscription stays on the buffer-aware per-endpoint route and
+      // passes the backends_compatible check with CPU-only publishers.
+      my_backend_types.push_back("cpu");
+      filtered_backends["cpu"] = "";
+    } else if (use_all) {
       filtered_backends = all_backends;
       for (const auto & [k, v] : all_backends) {
         my_backend_types.push_back(k);
+      }
+    } else {
+      for (const auto & name : requested_list) {
+        if (name == "cpu") {
+          continue;
+        }
+        auto it = all_backends.find(name);
+        if (it != all_backends.end()) {
+          filtered_backends[it->first] = it->second;
+          my_backend_types.push_back(it->first);
+        }
       }
     }
   }
