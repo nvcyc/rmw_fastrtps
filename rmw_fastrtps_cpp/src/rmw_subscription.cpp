@@ -221,12 +221,25 @@ rmw_create_subscription(
           endpoint->publisher_endpoint_info.endpoint_gid,
           pub_info.gid.data, RMW_GID_STORAGE_SIZE);
 
-        eprosima::fastdds::dds::TopicQos topic_qos =
-          info->dds_participant_->get_default_topic_qos();
-        auto * topic = info->dds_participant_->create_topic(
-          unique_topic,
-          info->type_support_.get_type_name(),
-          topic_qos);
+        // In single-process scenarios, the publisher may have already created
+        // this topic on the same DDS participant. Reuse it if it exists.
+        eprosima::fastdds::dds::Topic * topic = nullptr;
+        auto * existing_desc =
+          info->dds_participant_->lookup_topicdescription(unique_topic);
+        if (existing_desc) {
+          topic = dynamic_cast<eprosima::fastdds::dds::Topic *>(existing_desc);
+          if (topic) {
+            endpoint->owns_topic = false;
+          }
+        }
+        if (!topic) {
+          eprosima::fastdds::dds::TopicQos topic_qos =
+            info->dds_participant_->get_default_topic_qos();
+          topic = info->dds_participant_->create_topic(
+            unique_topic,
+            info->type_support_.get_type_name(),
+            topic_qos);
+        }
         if (!topic) {
           RCUTILS_LOG_ERROR_NAMED(
             "rmw_fastrtps_cpp",
@@ -247,6 +260,7 @@ rmw_create_subscription(
           eprosima::fastdds::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
         reader_qos.data_sharing().off();
         reader_qos.reliability().kind = eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS;
+        reader_qos.history() = info->datareader_qos_.history();
         constexpr auto rep = eprosima::fastdds::dds::XCDR_DATA_REPRESENTATION;
         reader_qos.representation().clear();
         reader_qos.representation().m_value.push_back(rep);
@@ -257,7 +271,9 @@ rmw_create_subscription(
           topic, reader_qos, buffer_listener.get(),
           eprosima::fastdds::dds::StatusMask::data_available());
         if (!data_reader) {
-          info->dds_participant_->delete_topic(topic);
+          if (endpoint->owns_topic) {
+            info->dds_participant_->delete_topic(topic);
+          }
           RCUTILS_LOG_ERROR_NAMED(
             "rmw_fastrtps_cpp",
             "Failed to create per-publisher DataReader for '%s'", unique_topic.c_str());
@@ -386,7 +402,7 @@ rmw_destroy_subscription(rmw_node_t * node, rmw_subscription_t * subscription)
       if (endpoint->data_reader) {
         info->subscriber_->delete_datareader(endpoint->data_reader);
       }
-      if (endpoint->topic) {
+      if (endpoint->topic && endpoint->owns_topic) {
         info->dds_participant_->delete_topic(endpoint->topic);
       }
     }

@@ -100,6 +100,18 @@ take_buffer_aware(
       rmw_fastrtps_shared_cpp::_assign_message_info(
         eprosima_fastrtps_identifier, message_info, &info_seq[0]);
     }
+
+    // Re-arm the guard condition if any buffer endpoint still has unread
+    // data.  DDS on_data_available only fires on a status *transition*, so
+    // if we took one sample while more remain, the guard would stay false
+    // and rmw_wait would never wake up for the remaining samples.
+    for (const auto & ep : info->buffer_endpoints_) {
+      if (ep->data_reader->get_unread_count() > 0) {
+        info->buffer_data_guard_->set_trigger_value(true);
+        break;
+      }
+    }
+
     return RMW_RET_OK;
   }
 

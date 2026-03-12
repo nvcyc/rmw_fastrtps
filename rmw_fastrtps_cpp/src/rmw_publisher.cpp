@@ -220,6 +220,7 @@ rmw_create_publisher(
           eprosima::fastdds::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
         writer_qos.data_sharing().off();
         writer_qos.reliability().kind = eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS;
+        writer_qos.history() = info->data_writer_->get_qos().history();
 
         auto * data_writer = info->dds_publisher_->create_datawriter(
           topic, writer_qos, nullptr);

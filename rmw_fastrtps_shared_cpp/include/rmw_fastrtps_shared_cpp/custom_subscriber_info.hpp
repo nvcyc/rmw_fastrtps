@@ -102,6 +102,7 @@ struct BufferSubscriptionEndpoint
   std::string key;
   eprosima::fastdds::dds::DataReader * data_reader{nullptr};
   eprosima::fastdds::dds::Topic * topic{nullptr};
+  bool owns_topic{true};
   std::shared_ptr<eprosima::fastdds::dds::DataReaderListener> listener;
   rmw_gid_t publisher_gid{};
   rmw_topic_endpoint_info_t publisher_endpoint_info{};
