@@ -932,9 +932,11 @@ bool TypeSupport<MembersType>::deserializeROSmessage(
                 deser.deserialize_array(buf->data(), dsize);
               }
             } else {
-              GenericCSequence<uint8_t>::init(seq, dsize);
+              if (!rosidl_runtime_c__uint8__Sequence__init(seq, dsize)) {
+                throw std::runtime_error("unable to initialize uint8 sequence");
+              }
               if (dsize > 0) {
-                deser.deserialize_array(reinterpret_cast<uint8_t *>(seq->data), dsize);
+                deser.deserialize_array(seq->data, dsize);
               }
             }
           }
